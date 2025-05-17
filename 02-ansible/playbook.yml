@@ -1,0 +1,75 @@
+- hosts: webserver
+  become: yes
+  vars_files:
+    - secrets.yml
+  vars:
+    docker_image: fgeeha/echo-server:latest
+    author_name: "Nikita Kolesnikov"
+
+  tasks:
+    - name: Установка зависимостей
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        update_cache: yes
+
+    - name: Добавление GPG-ключа Docker
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Добавление репозитория Docker
+      apt_repository:
+        repo: >-
+          deb [arch={{ ansible_architecture }} signed-by=/usr/share/keyrings/docker.gpg]
+          https://download.docker.com/linux/ubuntu
+          {{ ansible_lsb.codename }} stable
+        filename: docker
+        state: present
+
+    - name: Установка docker-ce
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        update_cache: yes
+
+    - name: Логин в Docker (если репозиторий приватный)
+      docker_login:
+        username: "{{ dockerhub_username }}"
+        password: "{{ dockerhub_password }}"
+
+    - name: Запуск 3 контейнеров
+      docker_container:
+        name: "echo-server-{{ item }}"
+        image: "{{ docker_image }}"
+        state: started
+        restart_policy: always
+        published_ports:
+          - "{{ 8000 + item }}:8000"
+        env:
+          AUTHOR: "{{ author_name }}"
+      loop: [1, 2, 3]
+
+    - name: Установка Nginx
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+
+    - name: Конфигурирование Nginx для балансировки нагрузки
+      template:
+        src: nginx.conf.j2
+        dest: /etc/nginx/sites-available/default
+      notify: Restart nginx
+
+  handlers:
+    - name: Restart nginx
+      service:
+        name: nginx
+        state: restarted
